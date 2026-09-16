@@ -26,8 +26,13 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# Helm — migrations are copied from api/migrations/ at deploy time
-helm/glyph/migrations/
+# Helm — migrations are NOT ignored in this fork. Upstream's cd.yml copies
+# api/migrations/ into the chart at deploy time, which works for a pipeline that
+# runs `helm upgrade` from a checkout. This fork is deployed by Argo CD reading
+# helm/glyph straight out of git, and Argo has no such step — an ignored
+# migrations/ renders an EMPTY migrations ConfigMap, the run-migrations init
+# container applies nothing, and the API comes up against an empty schema.
+# scripts/sync-migrations.sh regenerates the copy; CI fails on drift.
 
 # Playwright test results
 test-results/

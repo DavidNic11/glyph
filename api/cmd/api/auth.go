@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
 
 // setupAuth configures the authentication layer and returns the API router group
@@ -48,7 +47,7 @@ func setupAuth(ctx context.Context, r *gin.Engine, pool *pgxpool.Pool, s *stores
 	warnPartialOIDC(oidcReady, oidcIssuer, oidcClientID, oidcClientSecret)
 
 	if oidcReady {
-		return setupOIDCAuth(r, s, oidcIssuer, oidcClientID, oidcClientSecret, sessionSecret, cookieDomain, cookieSecure, frontendURL)
+		return setupOIDCAuth(ctx, r, s, oidcIssuer, oidcClientID, oidcClientSecret, sessionSecret, cookieDomain, cookieSecure, frontendURL)
 	}
 
 	// Dev-auth mode disables authentication entirely: every request is
@@ -86,7 +85,7 @@ func getOrGenerateConsentSecret() []byte {
 	return b
 }
 
-func setupOIDCAuth(r *gin.Engine, s *stores, issuer, clientID, clientSecret string, sessionSecret []byte, cookieDomain string, cookieSecure bool, frontendURL string) *gin.RouterGroup {
+func setupOIDCAuth(ctx context.Context, r *gin.Engine, s *stores, issuer, clientID, clientSecret string, sessionSecret []byte, cookieDomain string, cookieSecure bool, frontendURL string) *gin.RouterGroup {
 	users := s.users
 	callbackURL := os.Getenv("OIDC_REDIRECT_URL")
 	if callbackURL == "" {
@@ -97,11 +96,24 @@ func setupOIDCAuth(r *gin.Engine, s *stores, issuer, clientID, clientSecret stri
 		callbackURL = "http://localhost:" + port + "/auth/callback"
 	}
 
+	// The provider is described entirely by OIDC_ISSUER_URL. This used to be
+	// google.Endpoint, which meant the authorize and token URLs were Google's
+	// no matter what issuer was configured — so any non-Google provider sent
+	// the user to accounts.google.com carrying that provider's client_id, and
+	// an ID token that did somehow come back could never satisfy the
+	// jwt.WithIssuer(OIDC_ISSUER_URL) check in callbackHandler. Discovery also
+	// covers Google itself, which publishes a conforming document, so this is
+	// not a behaviour change for a Google deployment.
+	endpoint, err := auth.DiscoverEndpoint(ctx, issuer)
+	if err != nil {
+		log.Fatalf("OIDC discovery failed for issuer %q: %v", issuer, err)
+	}
+
 	sessionCfg := auth.SessionConfig{
 		OAuth2: oauth2.Config{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
-			Endpoint:     google.Endpoint,
+			Endpoint:     endpoint,
 			RedirectURL:  callbackURL,
 			Scopes:       []string{"openid", "email", "profile"},
 		},

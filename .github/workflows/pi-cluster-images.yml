@@ -1,0 +1,109 @@
+# Build glyph's two images for the pi-cluster (nicholascloudlab.com).
+#
+# Separate from upstream's ci.yml build-and-push / cd.yml, both of which are
+# guarded by `github.repository == 'imaustink/glyph'` and so never run here.
+# This fork deploys differently in two ways that matter:
+#
+#   * Images go to registry.nicholascloudlab.com, not registry.kurpuis.com.
+#   * There is no `helm upgrade` step. Argo CD reads helm/glyph out of this
+#     repo and reconciles continuously, so deploying means bumping the pinned
+#     image tag in DavidNic11/pi-cluster's charts/glyph/values.yml. That bump
+#     is deliberately manual — see the job summary this prints.
+name: pi-cluster images
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "src-tauri/**"
+      - "e2e/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pi-cluster-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    if: github.repository == 'DavidNic11/glyph'
+    # Self-hosted, in-cluster, arm64. Two independent reasons it cannot be
+    # ubuntu-latest: the Pi nodes are arm64 and an amd64 image dies with "exec
+    # format error" at pull time, and a GitHub-hosted runner would have to push
+    # through the Cloudflare tunnel, which caps request bodies at 100MB and so
+    # cannot carry Docker layer uploads at all.
+    #
+    # The scale set is defined in DavidNic11/pi-cluster:
+    # charts/arc/runner-glyph.yml + apps/arc/manifest.yaml.
+    runs-on: arc-glyph
+    steps:
+      - uses: actions/checkout@v4
+
+      # helm/glyph/migrations is a committed copy of api/migrations (upstream
+      # ignores it and copies at deploy time; Argo has no such step). If they
+      # drift, the chart silently ships an out-of-date schema — so fail here,
+      # before anything is pushed.
+      - name: Check chart migrations are in sync
+        run: ./scripts/sync-migrations.sh --check
+
+      - name: Docker login
+        run: |
+          echo "$REGISTRY_PASSWORD" | docker login registry.nicholascloudlab.com \
+            -u "$REGISTRY_USERNAME" --password-stdin
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # Immutable tag. Upstream tags by git TREE hash so its cd.yml can
+      # recompute the tag after a merge and redeploy without rebuilding; there
+      # is no such handoff here, and a commit SHA is what someone reading
+      # values.yml can actually trace back to a commit.
+      - name: Resolve image tag
+        id: image
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      # VITE_API_URL is deliberately EMPTY: the chart's Ingress serves the
+      # frontend and the API from one host (/ to the frontend, /api//auth//oauth
+      # to the API), so the browser calls the API same-origin. Setting it to an
+      # absolute URL would make every call cross-origin and drop the session
+      # cookie.
+      - name: Build & push frontend
+        run: |
+          docker build \
+            --build-arg VITE_STORAGE_MODE=api \
+            --build-arg VITE_API_URL= \
+            -t registry.nicholascloudlab.com/glyph-frontend:${{ steps.image.outputs.tag }} \
+            -f Dockerfile .
+          docker push registry.nicholascloudlab.com/glyph-frontend:${{ steps.image.outputs.tag }}
+
+      - name: Build & push API
+        run: |
+          docker build \
+            -t registry.nicholascloudlab.com/glyph-api:${{ steps.image.outputs.tag }} \
+            -f api/Dockerfile api/
+          docker push registry.nicholascloudlab.com/glyph-api:${{ steps.image.outputs.tag }}
+
+      - name: Summary
+        run: |
+          tag='${{ steps.image.outputs.tag }}'
+          {
+            echo "## Images pushed"
+            echo
+            echo '```'
+            echo "registry.nicholascloudlab.com/glyph-frontend:$tag"
+            echo "registry.nicholascloudlab.com/glyph-api:$tag"
+            echo '```'
+            echo
+            echo "### To deploy"
+            echo
+            echo "In \`DavidNic11/pi-cluster\`, set both tags in \`charts/glyph/values.yml\`:"
+            echo
+            echo '```bash'
+            echo "sed -i '' 's/^\(      tag: \).*/\1\"'\"$tag\"'\"/' charts/glyph/values.yml"
+            echo '```'
+            echo
+            echo "Commit and push; Argo reconciles on its own."
+          } >> "$GITHUB_STEP_SUMMARY"
