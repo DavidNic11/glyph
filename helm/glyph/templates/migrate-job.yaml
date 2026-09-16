@@ -1,3 +1,4 @@
+{{- if .Values.migrate.job.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -58,3 +59,4 @@ spec:
         - name: migrations
           configMap:
             name: {{ include "glyph.fullname" . }}-migrations
+{{- end }}

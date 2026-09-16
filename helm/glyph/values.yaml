@@ -150,6 +150,28 @@ cnpg:
 # Database migrations (golang-migrate)
 # =============================================================================
 migrate:
+  # The standalone migration Job is redundant with the api Deployment's
+  # run-migrations init container, which applies the same files on every pod
+  # start. It exists so that `helm upgrade` migrates even when the api pods do
+  # not restart.
+  #
+  # Set this false under a GitOps controller that renders with `helm template`
+  # (Argo CD, Flux). The Job is named with .Release.Revision, which is always 1
+  # outside a real Helm release, so:
+  #
+  #   * ttlSecondsAfterFinished deletes the Job 5 minutes after it completes,
+  #     the controller then sees it missing and recreates it — migrations
+  #     re-run every 5 minutes, forever.
+  #   * The name never changes, and a Job's pod template is immutable, so any
+  #     later change to the migrate image or command is rejected on apply and
+  #     parks the application permanently out of sync.
+  #
+  # The init container covers the GitOps case on its own: a chart change that
+  # alters migrations also alters the api pod spec, so the pods roll and the
+  # migrations run.
+  job:
+    enabled: true
+
   image:
     repository: migrate/migrate
     tag: "v4.17.0"

@@ -55,7 +55,25 @@ before anything is pushed. Run it after adding a migration.
 > The ConfigMap holds every `.sql` file (~136KB across 32 files today) against a 1MiB
 > object limit. Not close yet, but it is the ceiling this approach eventually hits.
 
-## 3. `.github/workflows/pi-cluster-images.yml`
+## 3. `migrate.job.enabled`
+
+New chart value, defaulting to `true` so upstream behaviour is unchanged.
+
+The chart's standalone migration Job is named `<fullname>-migrate-{{ .Release.Revision }}`.
+Under a GitOps controller that renders with `helm template` there is no release history, so
+the revision is always `1` and the name never changes. That breaks two ways:
+
+* `ttlSecondsAfterFinished: 300` deletes the Job five minutes after it completes; the
+  controller then sees it missing from live state and recreates it. Migrations re-run every
+  five minutes, forever.
+* A Job's pod template is immutable, so any later change to the migrate image or command is
+  rejected on apply — an unclosable diff that parks the application out of sync.
+
+The Job is redundant under GitOps anyway: the api Deployment runs the same `migrate up` as
+a `run-migrations` init container on every pod start, and a chart change that alters
+migrations alters the api pod spec too, so the pods roll and the migrations run.
+
+## 4. `.github/workflows/pi-cluster-images.yml`
 
 Builds both images arm64 on an in-cluster ARC runner (`runs-on: arc-glyph`) and pushes to
 `registry.nicholascloudlab.com`. Upstream's `ci.yml` build-and-push and `cd.yml` are both
