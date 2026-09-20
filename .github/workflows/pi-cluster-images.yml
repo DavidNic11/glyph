@@ -19,6 +19,16 @@ on:
       - "e2e/**"
       - "**/*.md"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag (default: 12-char commit SHA of the ref this runs on)"
+        required: false
+        type: string
+      push_latest:
+        description: "Also push :latest — convenience only, never reference it from values.yml"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -63,7 +73,21 @@ jobs:
       # values.yml can actually trace back to a commit.
       - name: Resolve image tag
         id: image
-        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          tag='${{ inputs.tag }}'
+          if [ -z "$tag" ]; then
+            tag="${GITHUB_SHA::12}"
+          fi
+          # Rejected here rather than four minutes later at `docker push`, and
+          # it also stops a tag with a slash in it from silently becoming part
+          # of the repository path.
+          case "$tag" in
+            *[!A-Za-z0-9._-]*|-*|.*|"")
+              echo "invalid tag '$tag': use [A-Za-z0-9._-], not starting with - or ." >&2
+              exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Building tag: $tag" >> "$GITHUB_STEP_SUMMARY"
 
       # VITE_API_URL is deliberately EMPTY: the chart's Ingress serves the
       # frontend and the API from one host (/ to the frontend, /api//auth//oauth
@@ -85,6 +109,19 @@ jobs:
             -t registry.nicholascloudlab.com/glyph-api:${{ steps.image.outputs.tag }} \
             -f api/Dockerfile api/
           docker push registry.nicholascloudlab.com/glyph-api:${{ steps.image.outputs.tag }}
+
+      # Opt-in, and deliberately a separate step so the immutable tag above is
+      # already pushed if this fails. Never point values.yml at :latest —
+      # imagePullPolicy is IfNotPresent, so a re-pushed moving tag leaves each
+      # node running whatever it cached, with nothing in Argo showing a diff.
+      - name: Push :latest
+        if: inputs.push_latest
+        run: |
+          for img in glyph-frontend glyph-api; do
+            docker tag "registry.nicholascloudlab.com/$img:${{ steps.image.outputs.tag }}" \
+                       "registry.nicholascloudlab.com/$img:latest"
+            docker push "registry.nicholascloudlab.com/$img:latest"
+          done
 
       - name: Summary
         run: |

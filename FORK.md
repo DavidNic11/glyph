@@ -83,6 +83,22 @@ There is no deploy step: Argo reconciles continuously, so deploying is a tag bum
 `pi-cluster`'s `charts/glyph/values.yml`. The workflow's job summary prints the exact
 command.
 
+Runs on every push to `main`, tagging with the 12-char commit SHA. `workflow_dispatch`
+takes an optional `tag` to override that, and an optional `push_latest`:
+
+```bash
+# commit SHA of whatever ref you pick
+gh workflow run pi-cluster-images.yml --repo DavidNic11/glyph
+
+# explicit tag, off a specific branch
+gh workflow run pi-cluster-images.yml --repo DavidNic11/glyph \
+  --ref main -f tag=v0.1.0
+```
+
+`:latest` is opt-in and should never be referenced from `values.yml` — `imagePullPolicy`
+is `IfNotPresent`, so a re-pushed moving tag leaves each node running whatever it already
+cached, with nothing for Argo to show as a difference.
+
 Requires `REGISTRY_USERNAME` / `REGISTRY_PASSWORD` repo secrets —
 `manifests/glyph/seal-secrets.sh` in `pi-cluster` sets them from the cluster's own
 credentials, so the two cannot drift.
