@@ -30,6 +30,14 @@
   let editor = $state<Editor | null>(null);
   let contentLoaded = $state(false);
 
+  // The page whose content is *actually* in the editor right now. This lags
+  // `pageId` during navigation because loadContent() is async: `pageId` updates
+  // synchronously while the editor still holds the previous page's document.
+  // Every write/sync path must key off this rather than `pageId`, otherwise a
+  // transaction dispatched mid-navigation saves the old document under the new
+  // page's id — the cause of the 2026-09-21 data-loss incident.
+  let loadedPageId = $state<string | null>(null);
+
   // Reactive state for template rendering
   let pending = $state<PendingTaskDetails | null>(null);
   let removedBulletTimer: ReturnType<typeof setTimeout> | null = null;
@@ -38,7 +46,11 @@
 
   const contentSave = useContentSave(() => onchange?.());
 
-  const taskCreation = useTaskCreation(() => editor, (p) => { pending = p; });
+  const taskCreation = useTaskCreation(
+    () => editor,
+    (p) => { pending = p; },
+    () => loadedPageId
+  );
 
   const taskSync = useTaskSync(() => editor, () => pageId);
 
@@ -61,6 +73,11 @@
   $effect(() => {
     // Svelte tracks tasksStore.tasks (new array ref on every mutation)
     if (!editor) return;
+    // Only sync once the document in the editor is the one `pageId` refers to.
+    // Without this guard, a tasksStore mutation during navigation dispatches
+    // transactions against the *previous* page's document, and the resulting
+    // onUpdate persists it under the new pageId.
+    if (!contentLoaded || loadedPageId !== pageId) return;
     taskSync.syncExternalStatusChanges(editor, pageId);
   });
 
@@ -72,7 +89,9 @@
   async function loadContent() {
     if (!editor) return;
     const gen = ++loadGeneration;
-    const content = await pagesStore.getContent(pageId);
+    // Capture the target page up front — `pageId` may change while we await.
+    const targetPageId = pageId;
+    const content = await pagesStore.getContent(targetPageId);
     // Discard response if a newer loadContent was triggered while we were awaiting
     if (gen !== loadGeneration) return;
     if (content?.content && Object.keys(content.content).length > 0) {
@@ -80,9 +99,12 @@
     } else {
       editor.commands.setContent('', { emitUpdate: false });
     }
+    // From here on the editor genuinely holds targetPageId's document, so
+    // writes keyed off loadedPageId are safe.
+    loadedPageId = targetPageId;
     taskCreation.clearPrompted();
     bulletRemoval.snapshot(editor);
-    taskSync.syncTaskStatuses(editor, pageId);
+    taskSync.syncTaskStatuses(editor, targetPageId);
   }
 
   /**
@@ -106,7 +128,11 @@
 
     if (changed) {
       dispatch(tr);
-      pagesStore.saveContent(pageId, editor.getJSON() as Record<string, unknown>);
+      // Save under the page this document actually belongs to, not the
+      // possibly-newer reactive pageId.
+      if (loadedPageId) {
+        pagesStore.saveContent(loadedPageId, editor.getJSON() as Record<string, unknown>);
+      }
     }
   }
 
@@ -190,8 +216,13 @@
         if (removedBulletTimer) clearTimeout(removedBulletTimer);
         removedBulletTimer = setTimeout(() => bulletRemoval.detectRemovedTaskBullets(ed), 1000);
 
-        // Debounced content save
-        contentSave.scheduleSave(ed, pageId);
+        // Debounced content save. Key off loadedPageId — the page the document
+        // in the editor actually came from. Using the reactive `pageId` here
+        // meant any transaction dispatched during navigation (task sync, async
+        // task creation, nodeId migration) persisted the previous page's
+        // document under the new page's id.
+        if (!loadedPageId) return;
+        contentSave.scheduleSave(ed, loadedPageId);
       }
     });
 
@@ -217,7 +248,14 @@
         pending = null;
         if (removedBulletTimer) { clearTimeout(removedBulletTimer); removedBulletTimer = null; }
         contentLoaded = false;
+        // Mark the editor as holding no known page until loadContent() resolves.
+        // Any transaction dispatched in this window is now a no-op for saving
+        // rather than a write of the old document under the new id.
+        loadedPageId = null;
         editor.setEditable(false);
+        // Drop per-page task status memory so the next page starts clean and
+        // doesn't dispatch spurious status transactions for unrelated tasks.
+        taskSync.resetStatusMemory();
         void contentSave.flushAll().then(async () => {
           taskCreation.clearPrompted();
           await loadContent();

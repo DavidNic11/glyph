@@ -28,7 +28,16 @@ export interface TaskCreationOptions {
 	onPendingChange?: (pending: PendingTaskDetails | null) => void;
 }
 
-export function useTaskCreation(getEditor: () => Editor | null, onPendingChange?: (p: PendingTaskDetails | null) => void): TaskCreationHandle {
+export function useTaskCreation(
+	getEditor: () => Editor | null,
+	onPendingChange?: (p: PendingTaskDetails | null) => void,
+	/**
+	 * Returns the page whose document is currently loaded in the editor, or null
+	 * while a load is in flight. Used to drop async continuations that would
+	 * otherwise mutate a document belonging to a different page.
+	 */
+	getLoadedPageId?: () => string | null
+): TaskCreationHandle {
 	let pending: PendingTaskDetails | null = null;
 	const promptedNodeIds = new Set<string>();
 	let taskCreationQueue: Promise<string | null> = Promise.resolve(null);
@@ -65,6 +74,20 @@ export function useTaskCreation(getEditor: () => Editor | null, onPendingChange?
 				sourcePageId: params.pageId,
 				sourceNodeId: params.nodeId
 			});
+
+			// The await above may have spanned a page navigation. Mutating the
+			// document now would dispatch a transaction against whatever page is
+			// currently loaded, and the editor's onUpdate would persist it — the
+			// stale-document write pattern behind the 2026-09-21 incident. Only
+			// touch the document if it is still the one this task came from.
+			//
+			// Note the explicit callback check rather than a `?? params.pageId`
+			// fallback: a *null* return means "a page load is in flight", which
+			// must also skip the mutation. Only an absent callback opts out.
+			if (getLoadedPageId && getLoadedPageId() !== params.pageId) {
+				uiStore.markSaved();
+				return task.id;
+			}
 
 			getEditor()?.commands.setTaskIdForNode(params.nodeId, task.id);
 			pending = {

@@ -172,3 +172,34 @@ func (r *UpdateTemplateRequest) ApplyTo(t *model.Template) {
 		t.IsPrivate = *r.IsPrivate
 	}
 }
+
+// UpdateFolderLaneRequest defines the allowlisted fields for
+// PUT /folders/:id/lanes/:laneId.
+//
+// All fields are pointers so an absent field means "leave unchanged". Binding
+// the request into a full model.Lane instead meant a partial payload — which is
+// exactly what a rename (title only) and a drag-reorder (order only) send —
+// zeroed every field the client omitted, silently wiping lane titles, filter
+// rules and sort configuration.
+type UpdateFolderLaneRequest struct {
+	Title      *string           `json:"title" binding:"omitempty,min=1,max=100"`
+	FilterSet  *model.FilterSet  `json:"filterSet"`
+	SortConfig *model.SortConfig `json:"sortConfig"`
+	Order      *int              `json:"order" binding:"omitempty,gte=0"`
+}
+
+// ApplyTo merges non-nil fields from the request into the existing lane.
+func (r *UpdateFolderLaneRequest) ApplyTo(l *model.Lane) {
+	if r.Title != nil {
+		l.Title = *r.Title
+	}
+	if r.FilterSet != nil {
+		l.FilterSet = *r.FilterSet
+	}
+	if r.SortConfig != nil {
+		l.SortConfig = *r.SortConfig
+	}
+	if r.Order != nil {
+		l.Order = *r.Order
+	}
+}

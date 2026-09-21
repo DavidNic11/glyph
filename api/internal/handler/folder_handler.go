@@ -110,14 +110,14 @@ func (h *FolderHandler) UpdateFolderLane(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "lane not found"})
 		return
 	}
-	var body model.Lane
-	if !bindJSON(c, &body) {
+	var req UpdateFolderLaneRequest
+	if !bindJSON(c, &req) {
 		return
 	}
-	existing.Title = body.Title
-	existing.FilterSet = body.FilterSet
-	existing.SortConfig = body.SortConfig
-	existing.Order = body.Order
+	// Merge only the fields the client actually sent. Assigning every field
+	// from a fully-bound model.Lane wiped title/filters/sort whenever the
+	// client sent a partial payload (rename, reorder).
+	req.ApplyTo(existing)
 	if existing.FilterSet.Rules == nil {
 		existing.FilterSet.Rules = []model.FilterRule{}
 	}

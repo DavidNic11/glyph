@@ -74,6 +74,7 @@ func NewHarness(t *testing.T, b Backend) *Harness {
 	taskH := &handler.TaskHandler{Tasks: tasks, Perms: perms}
 	laneH := &handler.LaneHandler{Lanes: lanes}
 	tmplH := &handler.TemplateHandler{Templates: templates, Perms: perms}
+	folderH := &handler.FolderHandler{Pages: pages, Lanes: lanes, Tasks: tasks, Perms: perms}
 	orgH := &handler.OrgHandler{Orgs: orgs, Users: users}
 	shareH := &handler.ShareHandler{
 		Shares:    shares,
@@ -124,6 +125,12 @@ func NewHarness(t *testing.T, b Backend) *Harness {
 		api.PATCH("/lanes/:id", laneH.UpdateLane)
 		api.PUT("/lanes/:id", laneH.UpsertLane)
 		api.DELETE("/lanes/:id", laneH.DeleteLane)
+
+		api.GET("/folders/:id", folderH.GetFolder)
+		api.GET("/folders/:id/lanes", folderH.ListFolderLanes)
+		api.POST("/folders/:id/lanes", folderH.CreateFolderLane)
+		api.PUT("/folders/:id/lanes/:laneId", folderH.UpdateFolderLane)
+		api.DELETE("/folders/:id/lanes/:laneId", folderH.DeleteFolderLane)
 
 		api.GET("/templates", tmplH.ListTemplates)
 		api.POST("/templates", tmplH.CreateTemplate)
