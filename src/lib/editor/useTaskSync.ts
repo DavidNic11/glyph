@@ -14,10 +14,22 @@ export interface TaskSyncHandle {
 	syncExternalStatusChanges(editor: Editor, pageId: string): void;
 	/** Sync a linked task title when the bullet text changes (debounced). */
 	syncLinkedTaskTitleRealtime(editor: Editor, getPending: () => PendingTaskDetails | null, setPending: (p: PendingTaskDetails | null) => void): void;
+	/** Forget per-page task status memory (call when switching pages). */
+	resetStatusMemory(): void;
 }
 
 export function useTaskSync(getEditor: () => Editor | null, getPageId: () => string): TaskSyncHandle {
 	let prevTaskStatuses = new Map<string, TaskStatus>();
+
+	/**
+	 * Drop the per-page status memory. Must be called when the editor switches
+	 * pages: otherwise the incoming page's tasks all look "changed" relative to
+	 * the previous page's snapshot and syncExternalStatusChanges dispatches a
+	 * burst of transactions against a document that may not be loaded yet.
+	 */
+	function resetStatusMemory() {
+		prevTaskStatuses = new Map();
+	}
 
 	async function handleStatusCycled(nodeId: string, taskId: string, currentStatus: string) {
 		const newStatus = STATUS_CYCLE[currentStatus as TaskStatus] || 'todo';
@@ -85,7 +97,7 @@ export function useTaskSync(getEditor: () => Editor | null, getPageId: () => str
 		}
 	}
 
-	return { handleStatusCycled, syncTaskStatuses, syncLinkedTaskTitleRealtime, syncExternalStatusChanges };
+	return { handleStatusCycled, syncTaskStatuses, syncLinkedTaskTitleRealtime, syncExternalStatusChanges, resetStatusMemory };
 }
 
 function getListItemText(node: { forEach: (fn: (child: { type: { name: string }; textContent: string }) => void) => void }): string {

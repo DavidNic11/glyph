@@ -155,10 +155,15 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		notFoundOrError(c, err)
 		return
 	}
+	// Owners still need their bearer token's scope checked — CanWriteResource is
+	// the only caller of checkTokenScope, so skipping it for the owner let a
+	// token without task:write modify any task its granting user owns.
 	if existing.UserID != user.ID {
 		if !h.Perms.CanWriteResource(c, existing.UserID, existing.OrgID, model.ShareResourceTask, id, user.ID) {
 			return
 		}
+	} else if !checkTokenScope(c, existing.OrgID, model.ShareResourceTask, true) {
+		return
 	}
 	var req UpdateTaskRequest
 	if !bindJSON(c, &req) {

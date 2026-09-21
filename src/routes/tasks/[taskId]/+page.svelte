@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { tasksStore } from '$lib/stores/tasks.svelte';
   import { pagesStore } from '$lib/stores/pages.svelte';
@@ -86,18 +87,47 @@
   // Single debounce timer; only one save can be in-flight for description at a time.
   // The MarkdownEditor owns the editing state; we only track the latest markdown
   // to persist on the debounced save.
+  //
+  // The task id is captured at *schedule* time and re-verified at flush time.
+  // Reading the reactive `task` at flush time instead meant navigating to another
+  // task within the debounce window saved this task's description onto that one.
   let _pendingDesc = '';
+  let _pendingDescTaskId: string | null = null;
   let _descTimer: ReturnType<typeof setTimeout> | null = null;
   function handleDescChange(markdown: string) {
+    if (!task) return;
     _pendingDesc = markdown;
+    _pendingDescTaskId = task.id;
     if (_descTimer) clearTimeout(_descTimer);
     _descTimer = setTimeout(() => {
       _descTimer = null;
-      updateField('description', _pendingDesc).catch(() => {
-        // Error already surfaced via notificationsStore inside updateField
-      });
+      const targetTaskId = _pendingDescTaskId;
+      const markdownToSave = _pendingDesc;
+      _pendingDescTaskId = null;
+      if (!targetTaskId) return;
+      tasksStore
+        .updateTask(targetTaskId, { description: markdownToSave })
+        .catch((err) => {
+          notificationsStore.error('Failed to save changes. Please try again.');
+          console.error('description save failed:', err);
+        });
     }, 600);
   }
+
+  // Flush any pending description edit immediately on unmount so it lands
+  // against its captured task rather than waiting out the debounce window.
+  onDestroy(() => {
+    if (!_descTimer) return;
+    clearTimeout(_descTimer);
+    _descTimer = null;
+    const targetTaskId = _pendingDescTaskId;
+    const markdownToSave = _pendingDesc;
+    _pendingDescTaskId = null;
+    if (!targetTaskId) return;
+    tasksStore
+      .updateTask(targetTaskId, { description: markdownToSave })
+      .catch((err) => console.error('description flush failed:', err));
+  });
 
   // ── Link / URL unfurl ────────────────────────────────────────────────────
   let linkInput = $state('');

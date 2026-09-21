@@ -123,11 +123,16 @@ func (h *PageHandler) UpdatePage(c *gin.Context) {
 		notFoundOrError(c, err)
 		return
 	}
-	// Non-owners need write permission.
+	// Non-owners need write permission. Owners still need their bearer token's
+	// scope checked — CanWritePage is the only caller of checkTokenScope, so
+	// skipping it for the owner let a token without page:write (or scoped to a
+	// different org) modify any page its granting user owns.
 	if existing.UserID != user.ID {
 		if !h.Perms.CanWritePage(c, existing, user.ID) {
 			return
 		}
+	} else if !checkTokenScope(c, existing.OrgID, model.ShareResourcePage, true) {
+		return
 	}
 	var req UpdatePageRequest
 	keys, ok := bindJSONWithKeys(c, &req)
@@ -279,6 +284,8 @@ func (h *PageHandler) UpsertPageContent(c *gin.Context) {
 		if !h.Perms.CanWritePage(c, page, user.ID) {
 			return
 		}
+	} else if !checkTokenScope(c, page.OrgID, model.ShareResourcePage, true) {
+		return
 	}
 	var body model.PageContent
 	if !bindJSON(c, &body) {
