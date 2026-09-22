@@ -170,6 +170,25 @@ All routes are prefixed with `/api/v1`. All request and response bodies are JSON
 
 ---
 
+## Command-line client (glyphctl)
+
+`glyphctl` is a CLI for interacting with a running Glyph server over this API. It
+covers pages, tasks, lanes, and templates, and can mint a bearer token via the
+`client_credentials` grant.
+
+```bash
+# Build it
+make build-cli            # → api/bin/glyphctl  (from the repo root)
+
+# Or run it directly
+cd api && go run ./cmd/glyphctl health
+```
+
+See [`cmd/glyphctl/README.md`](cmd/glyphctl/README.md) for the full command
+reference and examples.
+
+---
+
 ## Running migrations manually
 
 ```bash

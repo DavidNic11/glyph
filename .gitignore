@@ -11,6 +11,7 @@ node_modules
 # Go / Air
 api/tmp/
 api/server
+api/bin/
 
 # OS
 .DS_Store
