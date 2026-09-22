@@ -56,6 +56,11 @@ test-go:
 	cd api && go build ./...
 	cd api && go test ./... -short -count=1
 
+## build-cli: Build the glyphctl command-line client into api/bin/glyphctl
+.PHONY: build-cli
+build-cli:
+	cd api && go build -o bin/glyphctl ./cmd/glyphctl
+
 # ── E2E ───────────────────────────────────────────────────────────────────────
 
 ## test-e2e-local: Playwright local-storage project (no backend; dev server auto-started)
