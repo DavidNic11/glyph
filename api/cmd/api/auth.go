@@ -100,11 +100,17 @@ func setupOIDCAuth(ctx context.Context, r *gin.Engine, s *stores, issuer, client
 	// document, so OIDC_ISSUER_URL on its own describes the provider — the
 	// same value callbackHandler enforces on the ID token's iss claim.
 	//
+	// Use the canonical issuer discovery returns (the provider's own `issuer`
+	// value) for IssuerURL, not the raw env var: jwt.WithIssuer does an
+	// exact-string match against the ID token's iss claim, so a trailing-slash
+	// or scheme difference in OIDC_ISSUER_URL would otherwise pass discovery yet
+	// fail every token with an opaque "invalid_id_token".
+	//
 	// Fatal on failure rather than falling back to a compiled-in provider: a
 	// fallback yields a server that validates tokens against the configured
 	// issuer while sending users somewhere else to authenticate, which cannot
 	// succeed and reports itself far from the cause.
-	endpoint, err := auth.DiscoverEndpoint(ctx, issuer)
+	endpoint, canonicalIssuer, err := auth.DiscoverEndpoint(ctx, issuer)
 	if err != nil {
 		log.Fatalf("OIDC discovery failed for issuer %q: %v", issuer, err)
 	}
@@ -117,7 +123,7 @@ func setupOIDCAuth(ctx context.Context, r *gin.Engine, s *stores, issuer, client
 			RedirectURL:  callbackURL,
 			Scopes:       []string{"openid", "email", "profile"},
 		},
-		IssuerURL:     issuer,
+		IssuerURL:     canonicalIssuer,
 		SessionSecret: sessionSecret,
 		CookieDomain:  cookieDomain,
 		CookieSecure:  cookieSecure,
